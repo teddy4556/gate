@@ -1,13 +1,11 @@
 name: VPN Gate Node Check
 
-# 模板仓库默认不配置定时任务：需要自动更新时，把下面的注释替换成你自己的 cron。
+# 定时任务：每 3 小时跑一次（0 点 / 3 点 / 6 点 ... UTC）
 # 注意：GitHub 调度最小间隔约 5 分钟，但通常会延迟几分钟；仓库连续 60 天无提交会让定时任务自动停用。
 #
-# on:
-#   schedule:
-#     - cron: '*/30 * * * *'
-
 on:
+  schedule:
+    - cron: '0 */3 * * *'
   workflow_dispatch:
     inputs:
       max_nodes:
@@ -17,7 +15,7 @@ on:
       concurrency:
         description: '并发数（建议 16–32）'
         required: false
-        default: '32'
+        default: '16'
       timeout:
         description: '单节点检测超时（秒）'
         required: false
@@ -65,7 +63,7 @@ jobs:
       - name: Run pipeline
         env:
           CHECK_WORKER: "https://${{ secrets.DOMAIN }}/check?sstp=vpn:vpn@"
-          CHECK_CONCURRENCY: ${{ github.event.inputs.concurrency || '32' }}
+          CHECK_CONCURRENCY: ${{ github.event.inputs.concurrency || '16' }}
           CHECK_TIMEOUT: ${{ github.event.inputs.timeout || '25' }}
           MAX_CHECK_NODES: ${{ github.event.inputs.max_nodes || '0' }}
           MIN_SUCCESS_RATIO: '0'
