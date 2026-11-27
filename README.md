@@ -4,6 +4,27 @@
 
 > 这是一个模板仓库：**你只需要 Fork、添加一个 Secret、手动跑一次**，不需要改代码。
 
+> ### ⚠️ 本实例的定时机制（2026-11-27 实测，重要）
+>
+> **GitHub 的 `schedule` 触发器在这个仓库上不会触发**，原因有两层：
+>
+> 1. **Fork 禁用**：GitHub 对公开仓的 Fork 默认禁用定时任务
+>    （官方说明：*When a public repository is forked, scheduled workflows are disabled by default*）。
+> 2. **平台层失灵**：即使换成非 Fork 的独立仓也不可靠 —— 上游非 fork 仓 `hezhanleiok/gate` 的 `*/30` cron
+>    在 38.5 小时内只触发 9 次（理论 77 次，丢跑 88.3%，单次间隔 2.7~6.8 小时）；
+>    社区讨论 206019 / 207346 显示 2026-08-26 起多个仓的 schedule 完全不创建 run，而 `workflow_dispatch` 正常。
+>    实测本仓 `event=schedule` 恒为 0。
+>
+> **所以本实例的实际刷新由外部调度器驱动**：NAS 侧 Hermes cron 每 6 小时调
+> `POST /repos/teddy4556/gate/actions/workflows/check.yml/dispatches`（`ref=main`），失败自动重试。
+> 本文件里的 `schedule` cron 只作机会性补充，**不承担准时责任**。
+>
+> | 用途 | 地址 |
+> | :--- | :--- |
+> | 订阅（edgetunnel 自定义优选 IP） | `https://teddy4556.github.io/gate/nodes.txt` |
+> | 仪表盘 | `https://teddy4556.github.io/gate/` |
+> | 结构化数据 | `https://teddy4556.github.io/gate/data.json` |
+
 ---
 
 ## 特性
