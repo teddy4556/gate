@@ -830,11 +830,19 @@ def build_nodes_text(data: dict[str, Any], edge_hosts: list[str], cfg: Config) -
         raise ConfigError("优选入口池为空，无法生成 nodes.txt")
     lines: list[str] = []
     seen_links: set[str] = set()
-    index = 0
     ordered = sorted(
         data["countries"].items(),
         key=lambda kv: (-int(kv[1].get("count") or 0), str(kv[1].get("code") or kv[0])),
     )
+
+    # ★ 入口按【国家分段】分配,国与国之间不复用同一批入口。
+    #   旧写法是全局 index 轮转(edge_hosts[index % len(edge_hosts)]):入口池小于节点数时,
+    #   靠前国家(count 大)会占满全部入口,靠后国家(如韩国)只能复用同一批,
+    #   下游 edgetunnel 按入口去重后就分不出国家 —— 表现为「某国节点读取不出来」。
+    #   现在:先按各国节点数把入口池切成分段,每国在自己的段内轮转,
+    #   段内用完回绕到本段起点(仍不越到别国段),保证国与国之间入口不重叠。
+    country_count = max(1, len(ordered))
+    per_country: list[tuple[str, list[dict[str, Any]]]] = []
     for code, group in ordered:
         name = COUNTRY_ZH.get(code) or group.get("name") or code
         nodes = sorted(
@@ -844,17 +852,39 @@ def build_nodes_text(data: dict[str, Any], edge_hosts: list[str], cfg: Config) -
         residential = [n for n in nodes if n.get("residential") == "residential"]
         others = [n for n in nodes if n.get("residential") != "residential"]
         chosen = residential[: cfg.max_residential_per_country] + others[: cfg.max_datacenter_per_country]
+        per_country.append((name, chosen))
+
+    pool_size = len(edge_hosts)
+    total_nodes = sum(len(nodes) for _, nodes in per_country)
+    segment_sizes: list[int] = []
+    remaining = pool_size
+    for gi, (_, nodes) in enumerate(per_country):
+        left = len(per_country) - gi - 1
+        if left == 0:
+            segment_sizes.append(max(1, remaining))
+            break
+        share = max(1, min(remaining - left, round(remaining * len(nodes) / max(1, total_nodes))))
+        segment_sizes.append(share)
+        remaining -= share
+    # 入口池不够分时:退化为每国均分同样的段长(仍保证不重叠,只是段内要回绕)
+    if remaining < 0:
+        segment_sizes = [max(1, pool_size // country_count)] * country_count
+
+    offset = 0
+    for (name, chosen), seg_size in zip(per_country, segment_sizes):
+        seg_size = max(1, seg_size)
+        segment = edge_hosts[offset : offset + seg_size] or edge_hosts[:1]
+        offset = (offset + seg_size) % pool_size
         counters = {"residential": 0, "datacenter": 0, "unknown": 0}
-        for node in chosen:
-            link = f"sstp://vpn:vpn@{node['host']}:{node['port']}"
+        for local_index, node in enumerate(chosen):
+            link = f"sstp://vpn:***@{node['host']}:{node['port']}"
             if link in seen_links:
                 continue
             seen_links.add(link)
             kind_key = node.get("residential") if node.get("residential") in counters else "unknown"
             counters[kind_key] += 1
             kind = {"residential": "住宅", "datacenter": "机房", "unknown": "未知"}[kind_key]
-            entry = edge_hosts[index % len(edge_hosts)]
-            index += 1
+            entry = segment[local_index % len(segment)]
             lines.append(f"{entry}#{sanitize_remark(f'{name}-{kind}-{counters[kind_key]:02d}')}${link}")
     return "\n".join(lines) + ("\n" if lines else "")
 
