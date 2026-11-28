@@ -4,20 +4,22 @@
 
 > 这是一个模板仓库：**你只需要 Fork、添加一个 Secret、手动跑一次**，不需要改代码。
 
-> ### ⚠️ 本实例的定时机制（2026-11-27 实测，重要）
+> ### ⚠️ 本实例的定时机制（2026-11-27/28 实测，重要）
 >
-> **GitHub 的 `schedule` 触发器在这个仓库上不会触发**，原因有两层：
+> **本仓的 `schedule` 触发器已被移除，只保留 `workflow_dispatch` —— 定时刷新由 NAS 侧主时钟驱动。**
 >
-> 1. **Fork 禁用**：GitHub 对公开仓的 Fork 默认禁用定时任务
->    （官方说明：*When a public repository is forked, scheduled workflows are disabled by default*）。
-> 2. **平台层失灵**：即使换成非 Fork 的独立仓也不可靠 —— 上游非 fork 仓 `hezhanleiok/gate` 的 `*/30` cron
->    在 38.5 小时内只触发 9 次（理论 77 次，丢跑 88.3%，单次间隔 2.7~6.8 小时）；
->    社区讨论 206019 / 207346 显示 2026-08-26 起多个仓的 schedule 完全不创建 run，而 `workflow_dispatch` 正常。
->    实测本仓 `event=schedule` 恒为 0。
+> 为什么不留原生 cron（三条都是实测）：
 >
-> **所以本实例的实际刷新由外部调度器驱动**：NAS 侧 Hermes cron 每 6 小时调
-> `POST /repos/teddy4556/gate/actions/workflows/check.yml/dispatches`（`ref=main`），失败自动重试。
-> 本文件里的 `schedule` cron 只作机会性补充，**不承担准时责任**。
+> 1. **它确实会触发，但不准**：2026-11-28T01:24:45Z 真跑了一次（UTC 01:07 的窗口，延迟 17 分钟）。
+>    `schedule` 是 best-effort 共享基础设施，高负载时还会整批丢弃；公开仓连续 60 天无提交会被自动停用。
+>    参照：上游非 fork 仓 `hezhanleiok/gate` 的 `*/30` cron 在 38.5 小时内只触发 9 次（理论 77 次，丢跑 88.3%）。
+> 2. **原生触发的 run 没有重试**：撞上 Pages 的 artifact 元数据竞态就静默失败 —— 上面那次 schedule run
+>    结论就是 `failure`，产物根本没更新。
+> 3. **双时钟并存**会重复消耗检测配额，还互相污染 run 历史。
+>
+> **NAS 侧主时钟**：Hermes cron `ca5216509456`（`7 */6 * * *`，Asia/Shanghai）每 6 小时调
+> `POST /repos/teddy4556/gate/actions/workflows/check.yml/dispatches`（`ref=main`），
+> 自带失败重试 3 轮 + 产物时间戳核对 + 静默告警（健康期不打扰，故障才出声）。
 >
 > | 用途 | 地址 |
 > | :--- | :--- |
@@ -66,19 +68,17 @@ GitHub Actions (手动或 cron)
 
 ## 自动更新（可选）
 
-模板默认**不配置定时任务**，避免给你的仓库带来意外消耗。需要自动更新时，在 `.github/workflows/check.yml` 里取消注释：
+模板默认**不配置定时任务**，避免给你的仓库带来意外消耗。
 
-```yaml
-on:
-  schedule:
-    - cron: '*/30 * * * *'
-```
-
-注意事项：
-
-- GitHub 的定时任务最小间隔约 5 分钟，但实际通常会延迟几分钟，不保证准点。
-- 仓库连续 60 天没有提交，定时任务会被 GitHub 自动停用。
-- 需要固定时间就写 UTC 时间，例如北京时间 08:00 = `0 0 * * *`。
+> ⚠️ **本实例已主动移除 `schedule` 触发器**（理由见上节）。如果你基于模板另建仓并想要自动更新，
+> 可以自己加回 `schedule`，但要知道它**只保证「大概会跑」，不保证准点、不保证不失败**：
+>
+> - GitHub 的定时任务最小间隔约 5 分钟，实际通常会延迟几分钟到数小时，高负载时可能整批丢弃。
+> - 仓库连续 60 天没有提交，定时任务会被 GitHub 自动停用。
+> - 需要固定时间就写 UTC 时间，例如北京时间 08:00 = `0 0 * * *`。
+>
+> **更稳的做法是用外部调度器定时调 `workflow_dispatch`**（本实例的做法），它能自己重试、自己核对产物、
+> 失败时通知你 —— GitHub 原生 cron 三样都做不到。
 
 ## 配置项
 
