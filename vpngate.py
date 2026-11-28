@@ -74,6 +74,9 @@ DEFAULT_EDGE_HOSTS = [
     "china-unicom.cname.cloudflare.468123.xyz:443",
 ]
 
+# 每国至少分到的入口数(小国保底冗余,避免整国节点挤在同一个入口)
+MIN_ENTRIES_PER_COUNTRY = 3
+
 DATA_CENTER_ORG_KEYWORDS = [
     "GOOGLE", "AMAZON", "AWS", "MICROSOFT", "OVH", "HETZNER", "DIGITALOCEAN",
     "AKAMAI", "CLOUDFLARE", "FASTLY", "RACKSPACE", "EQUINIX", "LINODE", "VULTR",
@@ -856,17 +859,24 @@ def build_nodes_text(data: dict[str, Any], edge_hosts: list[str], cfg: Config) -
 
     pool_size = len(edge_hosts)
     total_nodes = sum(len(nodes) for _, nodes in per_country)
+    # 每国保底 MIN_PER_COUNTRY 个入口:小国(节点少)若只分到 1 个,本国所有节点会挤在同一个
+    # 入口上,入口一挂就整国不可用 —— 保底保证每国至少有多个可轮换的入口。
+    min_per_country = min(MIN_ENTRIES_PER_COUNTRY, max(1, pool_size // country_count))
     segment_sizes: list[int] = []
     remaining = pool_size
     for gi, (_, nodes) in enumerate(per_country):
         left = len(per_country) - gi - 1
         if left == 0:
-            segment_sizes.append(max(1, remaining))
+            segment_sizes.append(max(min_per_country, remaining))
             break
-        share = max(1, min(remaining - left, round(remaining * len(nodes) / max(1, total_nodes))))
+        proportional = round(remaining * len(nodes) / max(1, total_nodes))
+        # 保底与按比例取大者,但不能吃掉后面国家保底所需的份额
+        share = max(min_per_country, proportional)
+        share = min(share, remaining - left * min_per_country)
+        share = max(1, share)
         segment_sizes.append(share)
         remaining -= share
-    # 入口池不够分时:退化为每国均分同样的段长(仍保证不重叠,只是段内要回绕)
+    # 入口池不够每国保底时:退化为每国均分同样的段长(仍保证不重叠,只是段内要回绕)
     if remaining < 0:
         segment_sizes = [max(1, pool_size // country_count)] * country_count
 
