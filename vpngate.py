@@ -859,25 +859,28 @@ def build_nodes_text(data: dict[str, Any], edge_hosts: list[str], cfg: Config) -
 
     pool_size = len(edge_hosts)
     total_nodes = sum(len(nodes) for _, nodes in per_country)
-    # 每国保底 MIN_PER_COUNTRY 个入口:小国(节点少)若只分到 1 个,本国所有节点会挤在同一个
-    # 入口上,入口一挂就整国不可用 —— 保底保证每国至少有多个可轮换的入口。
+    # 两阶段分配:
+    #   ① 先给每国发保底(每国至少 MIN_PER_COUNTRY 个入口,保证小国不会只有 1 个入口、
+    #      整国节点挤在同一条线上、入口一挂就整国不可用);
+    #   ② 剩余入口再按各国节点数比例分配(用累计比例法取整,保证总和恰好用满入口池、
+    #      不因逐项取整而漏掉零头)。
+    # 任何阶段都不让某国拿到别的国家的入口 —— 国家之间入口集合交集恒为空。
     min_per_country = min(MIN_ENTRIES_PER_COUNTRY, max(1, pool_size // country_count))
-    segment_sizes: list[int] = []
-    remaining = pool_size
-    for gi, (_, nodes) in enumerate(per_country):
-        left = len(per_country) - gi - 1
-        if left == 0:
-            segment_sizes.append(max(min_per_country, remaining))
-            break
-        proportional = round(remaining * len(nodes) / max(1, total_nodes))
-        # 保底与按比例取大者,但不能吃掉后面国家保底所需的份额
-        share = max(min_per_country, proportional)
-        share = min(share, remaining - left * min_per_country)
-        share = max(1, share)
-        segment_sizes.append(share)
-        remaining -= share
+    segment_sizes: list[int] = [min_per_country] * country_count
+    remaining = pool_size - sum(segment_sizes)
+    if remaining > 0 and total_nodes > 0:
+        order = sorted(range(country_count), key=lambda i: -len(per_country[i][1]))
+        allocated = 0
+        cum_nodes = 0
+        for gi in order:
+            cum_nodes += len(per_country[gi][1])
+            target = round(remaining * cum_nodes / total_nodes)
+            extra = target - allocated
+            if extra > 0:
+                segment_sizes[gi] += extra
+                allocated = target
     # 入口池不够每国保底时:退化为每国均分同样的段长(仍保证不重叠,只是段内要回绕)
-    if remaining < 0:
+    if sum(segment_sizes) > pool_size:
         segment_sizes = [max(1, pool_size // country_count)] * country_count
 
     offset = 0
