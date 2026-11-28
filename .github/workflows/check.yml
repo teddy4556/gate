@@ -1,12 +1,18 @@
 name: VPN Gate Node Check
 
-# 定时任务：每 6 小时跑一次（UTC 0/6/12/18 点的 07 分，即北京时间 08:07 / 14:07 / 20:07 / 02:07）
-# 分钟选 07 不选 00：GitHub 官方建议避开整点，整点是平台调度负载最高的时刻，延迟与丢跑都更严重。
-# 注意：GitHub 调度最小间隔约 5 分钟，但通常会延迟几分钟到数小时；仓库连续 60 天无提交会让定时任务自动停用。
+# ★ 定时刷新由【NAS 侧】驱动，本工作流只保留 workflow_dispatch 作为唯一入口。
+#
+# 为什么不用 GitHub 原生 schedule:
+#   ① schedule 是 best-effort 共享基础设施 —— 实测延迟 17 分钟起(UTC 01:07 的窗口 01:24 才跑),
+#      高负载时还会整批丢弃;公开仓连续 60 天无提交会被自动停用。
+#   ② 原生 cron 触发的 run 没有重试,撞上 Pages 的 artifact 元数据竞态就静默失败
+#      (实测 2026-11-28T01:24:45Z 那次 schedule run 就是 failure,产物没更新)。
+#   ③ 与 NAS 侧并存在同一个仓会重复消耗检测配额,还互相污染 run 历史。
+#   NAS 侧调度(Hermes cron ca5216509456,'7 */6 * * *', Asia/Shanghai)会调
+#   POST /repos/teddy4556/gate/actions/workflows/check.yml/dispatches(ref=main),
+#   自带失败重试 3 轮 + 产物核对 + 静默告警,是唯一的主时钟。
 #
 on:
-  schedule:
-    - cron: '7 */6 * * *'
   workflow_dispatch:
     inputs:
       max_nodes:
